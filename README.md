@@ -52,7 +52,7 @@ CUDA >= 11.0 (opcional)
 ## 📁 Estrutura do Projeto
 
 ```
-mtcnn_project/
+MTCNN/
 ├── config.py                    # Configurações globais
 ├── main.py                      # Script principal
 ├── requirements.txt             # Dependências
