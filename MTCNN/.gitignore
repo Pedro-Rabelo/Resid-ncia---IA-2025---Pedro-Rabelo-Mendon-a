@@ -1,0 +1,11 @@
+# Ignorar o ambiente virtual do Python
+venv/
+/venv/
+
+# Ignorar a pasta de dados locais
+data/
+/data/
+
+# Bônus: Arquivos comuns do Python a serem ignorados
+__pycache__/
+*.pyc

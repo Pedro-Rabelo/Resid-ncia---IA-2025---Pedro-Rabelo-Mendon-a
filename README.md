@@ -35,11 +35,6 @@ O MTCNN é uma arquitetura em cascata com três redes neurais convolucionais (P-
 
 ## 💻 Requisitos
 
-### Hardware Mínimo
-- **RAM**: 16GB (32GB recomendado)
-- **GPU**: NVIDIA com 6GB+ VRAM (opcional mas recomendado)
-- **Armazenamento**: 50GB livres
-
 ### Software
 ```bash
 Python >= 3.8

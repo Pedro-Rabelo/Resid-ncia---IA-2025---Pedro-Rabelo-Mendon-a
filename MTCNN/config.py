@@ -126,6 +126,17 @@ class Config:
     LOG_INTERVAL = 100
     SAVE_INTERVAL = 5  # Salvar checkpoint a cada N epochs
     TENSORBOARD_DIR = os.path.join(PROJECT_ROOT, 'runs')
+
+    # ==================== CONFIGURAÇÃO RÁPIDA PARA TESTE ====================
+    # Para teste rápido, reduzir epochs
+    PNET_EPOCHS = 10  # Original: 30
+    RNET_EPOCHS = 8   # Original: 25
+    ONET_EPOCHS = 8   # Original: 25
+    
+    # Limitar samples (opcional, para teste muito rápido)
+    # Adicionar no final da classe:
+    QUICK_TEST = True  # Ativar modo teste rápido
+    MAX_IMAGES = 2000  # Processar apenas 2000 imagens (vs 12000)
     
     @classmethod
     def create_dirs(cls):
