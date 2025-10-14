@@ -1,9 +1,3 @@
-"""
-========================================================================================
-ARQUIVO 1: data_preprocessing/generate_pnet_data.py
-========================================================================================
-"""
-
 import os
 import numpy as np
 import cv2
@@ -84,7 +78,7 @@ def generate_pnet_data():
     annotations = []
     
     for anno_idx, anno in enumerate(tqdm(wider_annos, desc="Processing WIDER FACE")):
-        img_path = os.path.join(Config.WIDER_FACE_DIR, 'WIDER_train', anno['image_path'])
+        img_path = os.path.join(Config.WIDER_FACE_DIR, 'WIDER_train', 'images', anno['image_path'])
         
         if not os.path.exists(img_path):
             continue
@@ -134,8 +128,11 @@ def generate_pnet_data():
                 save_path = os.path.join(neg_dir, f"{counters['negative']}.jpg")
                 Image.fromarray(crop_resized).save(save_path)
                 
-                # Anotação: img_path class x1 y1 x2 y2
-                annotations.append(f"{save_path} 0 0 0 0 0\n")
+                # ✅ CORREÇÃO: Converter para caminho relativo
+                rel_path = os.path.relpath(save_path, output_dir)
+                
+                # Anotação: img_path class x1 y1 x2 y2 landmarks(todos -1)
+                annotations.append(f"{rel_path} 0 0 0 0 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n")
                 
                 counters['negative'] += 1
                 neg_count += 1
@@ -163,13 +160,17 @@ def generate_pnet_data():
                 x2 = int(min(w - 1, gt_x2 + offset_w))
                 y2 = int(min(h - 1, gt_y2 + offset_h))
                 
-                if x2 <= x1 or y2 <= y1:
+                if x2 - x1 < 12 or y2 - y1 < 12:
                     continue
                 
                 crop_box = np.array([x1, y1, x2, y2])
+                iou = compute_iou(crop_box, gt_box.reshape(1, -1))[0]
                 
-                # Calcular IoU
-                iou = compute_iou(crop_box, gt_boxes).max()
+                crop = img_rgb[y1:y2, x1:x2]
+                if crop.size == 0:
+                    continue
+                    
+                crop_resized = cv2.resize(crop, (12, 12), interpolation=cv2.INTER_LINEAR)
                 
                 # Calcular offsets normalizados
                 crop_w = x2 - x1 + 1
@@ -180,43 +181,32 @@ def generate_pnet_data():
                 offset_x2 = (gt_x2 - x2) / crop_w
                 offset_y2 = (gt_y2 - y2) / crop_h
                 
-                # Crop
-                crop = img_rgb[y1:y2+1, x1:x2+1]
-                if crop.size == 0:
-                    continue
-                
-                crop_resized = cv2.resize(crop, (12, 12), interpolation=cv2.INTER_LINEAR)
-                
-                # Classificar como positive ou part
+                # POSITIVE: IoU > 0.65
                 if iou >= Config.IOU_POSITIVE:
-                    # POSITIVE
-                    if counters['positive'] >= 100000:  # Limitar
-                        continue
-                    
                     save_path = os.path.join(pos_dir, f"{counters['positive']}.jpg")
                     Image.fromarray(crop_resized).save(save_path)
                     
-                    # Anotação: img_path class offset_x1 offset_y1 offset_x2 offset_y2
-                    annotations.append(
-                        f"{save_path} 1 {offset_x1:.4f} {offset_y1:.4f} "
-                        f"{offset_x2:.4f} {offset_y2:.4f}\n"
-                    )
+                    # ✅ CORREÇÃO: Converter para caminho relativo
+                    rel_path = os.path.relpath(save_path, output_dir)
                     
+                    annotations.append(
+                        f"{rel_path} 1 {offset_x1:.4f} {offset_y1:.4f} {offset_x2:.4f} {offset_y2:.4f} "
+                        f"-1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n"
+                    )
                     counters['positive'] += 1
                 
-                elif iou >= Config.IOU_PART_MIN:
-                    # PART FACE
-                    if counters['part'] >= 100000:
-                        continue
-                    
+                # PART: 0.4 < IoU < 0.65
+                elif iou >= Config.IOU_PART:
                     save_path = os.path.join(part_dir, f"{counters['part']}.jpg")
                     Image.fromarray(crop_resized).save(save_path)
                     
-                    annotations.append(
-                        f"{save_path} 2 {offset_x1:.4f} {offset_y1:.4f} "
-                        f"{offset_x2:.4f} {offset_y2:.4f}\n"
-                    )
+                    # ✅ CORREÇÃO: Converter para caminho relativo
+                    rel_path = os.path.relpath(save_path, output_dir)
                     
+                    annotations.append(
+                        f"{rel_path} 2 {offset_x1:.4f} {offset_y1:.4f} {offset_x2:.4f} {offset_y2:.4f} "
+                        f"-1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n"
+                    )
                     counters['part'] += 1
     
     # ==================== GENERATE LANDMARK SAMPLES ====================
@@ -225,13 +215,11 @@ def generate_pnet_data():
     if len(celeba_landmarks) > 0:
         celeba_img_dir = os.path.join(Config.CELEBA_DIR, 'img_celeba')
         
-        for img_name, landmarks in tqdm(list(celeba_landmarks.items())[:50000], 
-                                        desc="Processing CelebA"):
-            if counters['landmark'] >= 50000:
+        for img_name, landmarks in tqdm(list(celeba_landmarks.items())[:40000], desc="Processing CelebA"):
+            if counters['landmark'] >= 40000:
                 break
-                
-            img_path = os.path.join(celeba_img_dir, img_name)
             
+            img_path = os.path.join(celeba_img_dir, img_name)
             if not os.path.exists(img_path):
                 continue
             
@@ -242,24 +230,22 @@ def generate_pnet_data():
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             h, w = img.shape[:2]
             
-            # Landmarks: [x1, y1, x2, y2, x3, y3, x4, y4, x5, y5]
-            # Calcular bounding box a partir dos landmarks
+            # Extrair bounding box dos landmarks
             x_coords = landmarks[0::2]
             y_coords = landmarks[1::2]
             
             x1 = int(max(0, x_coords.min() - 10))
             y1 = int(max(0, y_coords.min() - 10))
-            x2 = int(min(w - 1, x_coords.max() + 10))
-            y2 = int(min(h - 1, y_coords.max() + 10))
+            x2 = int(min(w-1, x_coords.max() + 10))
+            y2 = int(min(h-1, y_coords.max() + 10))
             
             box_w = x2 - x1 + 1
             box_h = y2 - y1 + 1
             
-            # Ignorar faces muito pequenas
             if box_w < 20 or box_h < 20:
                 continue
             
-            # Normalizar landmarks
+            # Normalizar landmarks para [0, 1]
             landmarks_norm = landmarks.copy()
             landmarks_norm[0::2] = (landmarks[0::2] - x1) / box_w
             landmarks_norm[1::2] = (landmarks[1::2] - y1) / box_h
@@ -275,9 +261,12 @@ def generate_pnet_data():
             save_path = os.path.join(landmark_dir, f"{counters['landmark']}.jpg")
             Image.fromarray(crop_resized).save(save_path)
             
+            # ✅ CORREÇÃO: Converter para caminho relativo
+            rel_path = os.path.relpath(save_path, output_dir)
+            
             # Anotação: img_path class 0 0 0 0 lmk1_x lmk1_y ... lmk5_x lmk5_y
             lmk_str = ' '.join([f"{x:.4f}" for x in landmarks_norm])
-            annotations.append(f"{save_path} 3 0 0 0 0 {lmk_str}\n")
+            annotations.append(f"{rel_path} 3 0 0 0 0 {lmk_str}\n")
             
             counters['landmark'] += 1
     

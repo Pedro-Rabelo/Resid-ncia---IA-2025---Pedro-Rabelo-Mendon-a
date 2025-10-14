@@ -100,51 +100,156 @@ class MTCNNDataset(Dataset):
 
 def parse_wider_face_annotation(anno_file):
     """
-    Parser para anotações do WIDER FACE
+    Parser OTIMIZADO para anotações do WIDER FACE
     
     Args:
-        anno_file: path para arquivo wider_face_train.txt ou similar
+        anno_file: path para wider_face_train_bbx_gt.txt
     
     Returns:
         annotations: lista de dicts com image_path e bboxes
+        
+    Formato WIDER FACE (sem linhas vazias):
+        image_path.jpg
+        num_faces
+        x1 y1 w h blur expression illumination invalid occlusion pose
+        x1 y1 w h blur expression illumination invalid occlusion pose
+        ...
+        next_image_path.jpg
+        num_faces
+        ...
     """
+    import numpy as np
+    
     annotations = []
     
-    with open(anno_file, 'r') as f:
+    with open(anno_file, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     
     i = 0
-    while i < len(lines):
-        # Linha com nome da imagem
+    total_lines = len(lines)
+    skipped_images = 0
+    invalid_boxes = 0
+    
+    while i < total_lines:
+        # ============ LINHA 1: IMAGEM ============
         img_path = lines[i].strip()
-        i += 1
         
-        # Número de faces
-        num_faces = int(lines[i].strip())
-        i += 1
-        
-        # Bboxes das faces
-        bboxes = []
-        for j in range(num_faces):
-            bbox_info = lines[i].strip().split()
+        # Validar se é realmente um caminho de imagem
+        if not img_path or not img_path.endswith('.jpg'):
+            print(f"⚠️ Linha {i}: Esperado caminho de imagem, encontrado: '{img_path}'")
+            skipped_images += 1
             i += 1
+            continue
+        
+        i += 1
+        
+        # Verificar se não chegou ao fim do arquivo
+        if i >= total_lines:
+            print(f"⚠️ Arquivo terminou após imagem: {img_path}")
+            break
+        
+        # ============ LINHA 2: NÚMERO DE FACES ============
+        num_faces_line = lines[i].strip()
+        
+        try:
+            num_faces = int(num_faces_line)
+        except ValueError:
+            print(f"⚠️ Linha {i}: Esperado número de faces, encontrado: '{num_faces_line}'")
+            print(f"   Imagem: {img_path}")
+            skipped_images += 1
+            i += 1
+            continue
+        
+        i += 1
+        
+        # ============ LINHAS 3+: BOUNDING BOXES ============
+        bboxes = []
+        
+        # Caso especial: imagens com 0 faces
+        if num_faces == 0:
+            # WIDER FACE coloca uma linha placeholder para 0 faces: "0 0 0 0 0 0 0 0 0 0"
+            # Precisamos pular esta linha
+            if i < total_lines:
+                placeholder_line = lines[i].strip()
+                # Verificar se é a linha placeholder (não é um caminho de imagem)
+                if not placeholder_line.endswith('.jpg'):
+                    i += 1
+            # Não adicionar imagens sem faces ao dataset
+            continue
+        
+        # Processar cada bounding box
+        for j in range(num_faces):
+            if i >= total_lines:
+                print(f"⚠️ Arquivo terminou ao processar bboxes de: {img_path}")
+                print(f"   Esperadas {num_faces} faces, encontradas {j}")
+                break
             
-            # Formato: x y w h blur expression illumination invalid occlusion pose
-            x, y, w, h = [int(float(v)) for v in bbox_info[:4]]
+            bbox_line = lines[i].strip()
             
-            # Ignorar faces inválidas
-            if len(bbox_info) >= 8 and int(bbox_info[7]) == 1:
+            # Validação de segurança: não deve ser um caminho de imagem
+            if bbox_line.endswith('.jpg'):
+                print(f"⚠️ Linha {i}: Encontrado caminho de imagem ao processar bboxes")
+                print(f"   Imagem atual: {img_path}")
+                print(f"   Esperadas {num_faces} faces, processadas {j}")
+                # Não incrementar i, deixar para próxima iteração do while
+                break
+            
+            # Parse da bbox
+            bbox_parts = bbox_line.split()
+            
+            # WIDER FACE formato: x y w h blur expression illumination invalid occlusion pose
+            if len(bbox_parts) < 4:
+                print(f"⚠️ Linha {i}: Bbox incompleta - {bbox_line}")
+                i += 1
+                invalid_boxes += 1
                 continue
             
-            # Converter para formato x1,y1,x2,y2
-            bbox = [x, y, x + w - 1, y + h - 1]
-            bboxes.append(bbox)
+            try:
+                x = int(bbox_parts[0])
+                y = int(bbox_parts[1])
+                w = int(bbox_parts[2])
+                h = int(bbox_parts[3])
+                
+                # Converter para formato [x1, y1, x2, y2]
+                x1 = x
+                y1 = y
+                x2 = x + w
+                y2 = y + h
+                
+                # Validar dimensões da bbox
+                if w > 0 and h > 0:
+                    bboxes.append([x1, y1, x2, y2])
+                else:
+                    invalid_boxes += 1
+                
+            except (ValueError, IndexError) as e:
+                print(f"⚠️ Linha {i}: Erro ao converter bbox - {bbox_line}")
+                print(f"   Erro: {e}")
+                invalid_boxes += 1
+            
+            i += 1
         
+        # Adicionar anotação somente se houver bboxes válidas
         if len(bboxes) > 0:
             annotations.append({
                 'image_path': img_path,
-                'bboxes': np.array(bboxes)
+                'bboxes': np.array(bboxes, dtype=np.float32)
             })
+    
+    # Relatório final
+    print(f"\n{'='*70}")
+    print(f"RELATÓRIO DO PARSER")
+    print(f"{'='*70}")
+    print(f"✓ Total de linhas processadas: {total_lines}")
+    print(f"✓ Imagens válidas: {len(annotations)}")
+    print(f"✓ Total de faces: {sum(len(a['bboxes']) for a in annotations)}")
+    
+    if skipped_images > 0:
+        print(f"⚠️ Imagens puladas: {skipped_images}")
+    if invalid_boxes > 0:
+        print(f"⚠️ Bboxes inválidas: {invalid_boxes}")
+    
+    print(f"{'='*70}\n")
     
     return annotations
 

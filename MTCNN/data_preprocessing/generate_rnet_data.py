@@ -69,7 +69,7 @@ def detect_with_pnet(pnet, image, min_face_size=20):
     
     if len(all_boxes) == 0:
         return np.array([])
-    
+   
     # Concatenar e aplicar NMS
     all_boxes = np.vstack(all_boxes)
     keep = nms(all_boxes[:, :5], all_boxes[:, 4], Config.PNET_NMS_THRESHOLD)
@@ -141,7 +141,7 @@ def generate_rnet_data():
     annotations = []
     
     for anno in tqdm(wider_annos[:5000], desc="WIDER FACE"):
-        img_path = os.path.join(Config.WIDER_FACE_DIR, 'WIDER_train', anno['image_path'])
+        img_path = os.path.join(Config.WIDER_FACE_DIR, 'WIDER_train', 'images', anno['image_path'])
         
         if not os.path.exists(img_path):
             continue
@@ -178,6 +178,7 @@ def generate_rnet_data():
                 continue
             crop_resized = cv2.resize(crop, (24, 24), interpolation=cv2.INTER_LINEAR)
             
+            # POSITIVE
             if max_iou >= Config.IOU_POSITIVE and counters['positive'] < 50000:
                 gt_box = gt_boxes[best_gt_idx]
                 crop_w, crop_h = x2 - x1 + 1, y2 - y1 + 1
@@ -190,13 +191,17 @@ def generate_rnet_data():
                 save_path = os.path.join(pos_dir, f"{counters['positive']}.jpg")
                 Image.fromarray(crop_resized).save(save_path)
                 
+                # ✅ CORREÇÃO: Converter para caminho relativo
+                rel_path = os.path.relpath(save_path, output_dir)
+                
                 annotations.append(
-                    f"{save_path} 1 {offset_x1:.4f} {offset_y1:.4f} "
-                    f"{offset_x2:.4f} {offset_y2:.4f}\n"
+                    f"{rel_path} 1 {offset_x1:.4f} {offset_y1:.4f} {offset_x2:.4f} {offset_y2:.4f} "
+                    f"-1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n"
                 )
                 counters['positive'] += 1
             
-            elif max_iou >= Config.IOU_PART_MIN and counters['part'] < 50000:
+            # PART
+            elif max_iou >= Config.IOU_PART and counters['part'] < 50000:
                 gt_box = gt_boxes[best_gt_idx]
                 crop_w, crop_h = x2 - x1 + 1, y2 - y1 + 1
                 
@@ -208,27 +213,36 @@ def generate_rnet_data():
                 save_path = os.path.join(part_dir, f"{counters['part']}.jpg")
                 Image.fromarray(crop_resized).save(save_path)
                 
+                # ✅ CORREÇÃO: Converter para caminho relativo
+                rel_path = os.path.relpath(save_path, output_dir)
+                
                 annotations.append(
-                    f"{save_path} 2 {offset_x1:.4f} {offset_y1:.4f} "
-                    f"{offset_x2:.4f} {offset_y2:.4f}\n"
+                    f"{rel_path} 2 {offset_x1:.4f} {offset_y1:.4f} {offset_x2:.4f} {offset_y2:.4f} "
+                    f"-1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n"
                 )
                 counters['part'] += 1
             
+            # NEGATIVE
             elif max_iou < Config.IOU_NEGATIVE and counters['negative'] < 50000:
                 save_path = os.path.join(neg_dir, f"{counters['negative']}.jpg")
                 Image.fromarray(crop_resized).save(save_path)
                 
-                annotations.append(f"{save_path} 0 0 0 0 0\n")
+                # ✅ CORREÇÃO: Converter para caminho relativo
+                rel_path = os.path.relpath(save_path, output_dir)
+                
+                annotations.append(
+                    f"{rel_path} 0 0 0 0 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n"
+                )
                 counters['negative'] += 1
     
-    # Landmarks
-    print("\n[4/5] Gerando landmarks...")
+    # Landmarks do CelebA
+    print("\n[4/5] Gerando landmarks do CelebA...")
     
     if len(celeba_landmarks) > 0:
         celeba_img_dir = os.path.join(Config.CELEBA_DIR, 'img_celeba')
         
-        for img_name, landmarks in tqdm(list(celeba_landmarks.items())[:30000], desc="CelebA"):
-            if counters['landmark'] >= 30000:
+        for img_name, landmarks in tqdm(list(celeba_landmarks.items())[:40000], desc="CelebA"):
+            if counters['landmark'] >= 40000:
                 break
             
             img_path = os.path.join(celeba_img_dir, img_name)
@@ -265,8 +279,11 @@ def generate_rnet_data():
             save_path = os.path.join(landmark_dir, f"{counters['landmark']}.jpg")
             Image.fromarray(crop_resized).save(save_path)
             
+            # ✅ CORREÇÃO: Converter para caminho relativo
+            rel_path = os.path.relpath(save_path, output_dir)
+            
             lmk_str = ' '.join([f"{x:.4f}" for x in landmarks_norm])
-            annotations.append(f"{save_path} 3 0 0 0 0 {lmk_str}\n")
+            annotations.append(f"{rel_path} 3 0 0 0 0 {lmk_str}\n")
             
             counters['landmark'] += 1
     
