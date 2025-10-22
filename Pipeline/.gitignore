@@ -1,2 +1,8 @@
 # Pasta do ambiente virtual do Python
 /venv/
+
+#pasta com pesos de modelos treinados
+/weights/
+
+/__pycache__/
+*.pyc
