@@ -300,8 +300,7 @@ def main(params):
         root=params.root,
         landmarks_json=params.landmarks_json,
         transform=train_transform,
-        min_images_per_class=params.min_images_per_class,
-        database='VggFace2'
+        min_images_per_class=params.min_images_per_class
     )
     
     # Get actual number of classes
