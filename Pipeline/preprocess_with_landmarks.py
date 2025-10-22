@@ -130,8 +130,19 @@ def preprocess_vggface2_dataset(input_root, output_root, output_landmarks_json,
     try:
         from uniface import RetinaFace
         import torch
-        detector = RetinaFace(gpu_id=0 if torch.cuda.is_available() else -1)
-        detector_name = "RetinaFace"
+        
+        # Configura device
+        if torch.cuda.is_available():
+            device = 'cuda:0'
+            print(f"✓ Usando GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            device = 'cpu'
+            print("✓ Usando CPU")
+        
+        # Inicializa detector (uniface detecta GPU automaticamente)
+        detector = RetinaFace()
+        detector_name = "RetinaFace (uniface)"
+        
     except ImportError:
         print("❌ RetinaFace não disponível!")
         print("Instale com: pip install uniface")
@@ -199,36 +210,44 @@ def preprocess_vggface2_dataset(input_root, output_root, output_landmarks_json,
                 img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 
                 # Detecta faces
-                faces = detector.detect_faces(img_rgb)
+                result = detector.detect(img_rgb)
                 
-                if len(faces) == 0:
+                if result is None or len(result) == 0:
                     stats["no_face"] += 1
                     continue
                 
-                if len(faces) > 1:
+                # uniface retorna (detections, landmarks)
+                # detections: [N, 5] = [x1, y1, x2, y2, score]
+                # landmarks: [N, 5, 2]
+                detections, keypoints_array = result
+                
+                if len(detections) == 0:
+                    stats["no_face"] += 1
+                    continue
+                
+                # Extrai boxes e scores
+                boxes = detections[:, :4]  # [N, 4]
+                scores = detections[:, 4]   # [N]
+                
+                if len(boxes) > 1:
                     stats["multiple_faces"] += 1
-                    # Seleciona a maior face
-                    faces = sorted(
-                        faces,
-                        key=lambda x: x['box'][2] * x['box'][3],
-                        reverse=True
-                    )
+                    best_idx = np.argmax(scores)
+                else:
+                    best_idx = 0
                 
-                # Usa a primeira (ou maior) face
-                face = faces[0]
-                bbox = face['box']  # [x, y, w, h]
-                keypoints = face['keypoints']
+                # Extrai box e landmarks da melhor face
+                box = boxes[best_idx]
+                score = scores[best_idx]
+                keypoints_face = keypoints_array[best_idx]  # [5, 2]
                 
-                # Converte keypoints para array de landmarks
-                landmarks_array = np.array([
-                    keypoints['left_eye'],
-                    keypoints['right_eye'],
-                    keypoints['nose'],
-                    keypoints['mouth_left'],
-                    keypoints['mouth_right']
-                ], dtype=np.float32)
+                # Converte box para [x, y, w, h]
+                x1, y1, x2, y2 = box
+                bbox = [int(x1), int(y1), int(x2 - x1), int(y2 - y1)]
                 
-                # Valida face detectada
+                # Landmarks
+                landmarks_array = keypoints_face.astype(np.float32)
+                
+                # Valida face
                 is_valid, reason = validate_face(landmarks_array, bbox, min_size)
                 if not is_valid:
                     if "too small" in reason.lower():
@@ -240,14 +259,14 @@ def preprocess_vggface2_dataset(input_root, output_root, output_landmarks_json,
                 # Alinha face
                 aligned_face, tform = align_face(img_rgb, landmarks_array)
                 
-                # Transforma landmarks para o espaço alinhado
+                # Transforma landmarks para espaço alinhado
                 landmarks_homogeneous = np.hstack([
                     landmarks_array,
                     np.ones((5, 1))
                 ])
                 landmarks_aligned = landmarks_homogeneous @ tform.T
                 
-                # Normaliza landmarks para [0, 1]
+                # Normaliza landmarks
                 landmarks_normalized = normalize_landmarks(landmarks_aligned)
                 
                 # Salva imagem alinhada
@@ -255,7 +274,7 @@ def preprocess_vggface2_dataset(input_root, output_root, output_landmarks_json,
                 aligned_pil = Image.fromarray(aligned_face)
                 aligned_pil.save(output_file, quality=95)
                 
-                # Salva landmarks no dicionário
+                # Salva landmarks
                 key = f"{identity_name}/{img_file.name}"
                 landmarks_dict[key] = landmarks_normalized
                 
